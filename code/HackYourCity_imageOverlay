@@ -1,0 +1,251 @@
+StringList imgURL;
+StringList inventory;
+PImage[] imgArray;
+//52.516396, 13.377892 brandenburger tor
+//52.521616, 13.445317 party?
+//52.520436, 13.409975 alex
+String lat = "52.516396";
+String lng = "13.377892";
+
+int imgSize = 640;
+
+void setup() {
+  background(0);
+  size(2*imgSize, imgSize);
+  colorMode(HSB, 360, 100, 100);
+  noStroke();
+  noCursor();
+  imgURL= new StringList();
+}
+
+void draw() { 
+
+  //gather the data 
+  int[] locIDArray = getLocationID(lat, lng);
+  for (int locID : locIDArray) {
+    getImgFromLocID(locID);
+  }
+
+  //load the images
+  imgArray = new PImage[imgURL.size()];
+  for (int i=0; i<imgArray.length; i++) {
+    imgArray[i] = loadImage(imgURL.get(i));
+    println(imgURL.get(i));
+    // image(imgArray[i],0,0);
+  }
+
+  //process the average image
+  processImg();
+
+  //print the sample images
+  printSamples();
+
+  println(imgArray.length);
+  println("--finished--");
+  noLoop();
+}
+
+
+void getImgFromLocID(int locID) {
+  JSONObject o = loadJSONObject("https://api.instagram.com/v1/locations/"+locID+"/media/recent?access_token=3598843.15d6adc.36a98ee4564c45d3ae3c2121b96fe0dc");
+  JSONArray data = o.getJSONArray("data");
+  for (int i=0; i<data.size (); i++) {
+    JSONObject jo = data.getJSONObject(i);
+    //check if jo is an image
+    if (jo.getString("type").equals("image")) {
+      JSONObject images = jo.getJSONObject("images");
+      JSONObject sr = images.getJSONObject("standard_resolution");  
+      String s = sr.getString("url");
+      imgURL.append(s);
+    }
+  }
+}
+
+
+void processImg() {
+  int tileCount = 640;
+  float rectSize = imgSize / float(tileCount);
+  color[] colors;
+
+  //PROCESSING METHODS
+  //hueMethod true --> calculate average Hue for every pixel
+  //hueMethod false --> calculate dominant Hue for every pixel
+  //hueInterval true --> calculate dominant Hue through hue intervals
+  boolean hueMethod = false;
+  boolean hueInterval = true;
+
+  float[] totalBrightness = new float[tileCount*tileCount];
+  float[] totalHue = new float[tileCount*tileCount];
+  float[] totalSaturation = new float[tileCount*tileCount];
+
+  int[] dominantHueCounter = new int[360];
+  float[] dominantHue = new float[tileCount*tileCount];
+
+  // get colors from image
+  for (int j = 0; j < imgArray.length; j++) {
+    colors = new color[tileCount*tileCount];
+    PImage tempImg;
+    for (int i=0; i<tileCount*tileCount; i++) {
+      int gridY = int(i/tileCount);
+      int gridX = i % tileCount;
+      int px = (int) (gridX * rectSize);
+      int py = (int) (gridY * rectSize);
+      tempImg = imgArray[j];
+      colors[i] = tempImg.get(px, py);
+
+      //println(hex(colors[i]));
+      totalBrightness[i] += brightness(colors[i]);
+      totalHue[i] += hue(colors[i]);
+      totalSaturation[i] += saturation(colors[i]);
+    }
+  }
+
+  //alternate method for dominant hue (hueMethod = false)
+  if (!hueMethod) {
+    colors = new color[tileCount*tileCount];
+    PImage tempImg;
+    for (int i = 0; i < tileCount*tileCount; i++) {
+      for (int j = 0; j < imgArray.length; j++) {
+        int gridY = int(i/tileCount);
+        int gridX = i % tileCount;
+        int px = (int) (gridX * rectSize);
+        int py = (int) (gridY * rectSize);
+        tempImg = imgArray[j];
+        colors[i] = tempImg.get(px, py);
+        dominantHueCounter[int(hue(colors[i]))]++;
+      }
+
+      if (!hueInterval) {
+        //calculate maximum frequence for single Hues
+        int index = 0;
+        for (int j = 0; j<dominantHueCounter.length; j++) {
+          if (dominantHueCounter[j]>dominantHueCounter[index]) {
+            index = j;
+          }
+        }
+
+        dominantHue[i] = index;
+      } else {
+        //calculate max frequence for Hue intervals
+        int[] sum = new int[360];
+        int intervalSize = 10;
+
+        for (int j=0; j < 360; j++) {
+          int partialSum = 0;
+          for (int k=0; k<intervalSize; k++) {
+            partialSum += dominantHueCounter[(j+k)%360];
+          }
+          sum[j] = partialSum;
+        }
+        
+        int index = 0;
+        for (int j = 0; j < sum.length; j++) {
+          if (sum[j]>sum[index]) {
+             index = j; 
+          }
+        }
+        
+        int index2 = index;
+        for (int j = index; j<(index+intervalSize); j++) {
+            if (dominantHueCounter[j%360]>dominantHueCounter[index2]){
+                index2 = j%360;
+            }              
+        }
+        
+        dominantHue[i]=index2;
+        
+      }
+    }
+  }
+
+  //calculate average color values
+
+  for (int i = 0; i < tileCount*tileCount; i++) {
+    totalBrightness[i] = totalBrightness[i]/imgArray.length;
+    totalHue[i] = totalHue[i]/imgArray.length;
+    totalSaturation[i] = totalSaturation[i]/imgArray.length;
+    //println(totalBrightness[i]);
+  }
+
+  //print black and white image
+
+  if (hueMethod) {
+    for (int i=0; i<tileCount*tileCount; i++) {
+      int gridY = int(i/tileCount);
+      int gridX = i % tileCount;
+      fill(totalHue[i], totalSaturation[i], totalBrightness[i]);
+      rect(gridX*rectSize, gridY*rectSize, rectSize, rectSize);
+    }
+  } else {
+    for (int i=0; i<tileCount*tileCount; i++) {
+      int gridY = int(i/tileCount);
+      int gridX = i % tileCount;
+      fill(dominantHue[i], totalSaturation[i], totalBrightness[i]);
+      rect(gridX*rectSize, gridY*rectSize, rectSize, rectSize);
+    }
+  }
+
+  /*color blueAvg=0;
+   color redAvg=0;
+   color greenAvg=0;
+   int counter=0;
+   tint(255, 10);
+   for (int i=1; i<imgArray.length; i++) {
+   PImage img = imgArray[i];
+   image(img, 0, 0, width, height);
+   //sample random pixels
+   for (int j=0; j<20; j++) {
+   color c = img.pixels[(int)random(0, img.pixels.length-1)];
+   blueAvg += blue(c);
+   redAvg +=red(c);
+   greenAvg += green(c);
+   counter++;
+   
+   }
+   color c = color(redAvg/counter, greenAvg/counter, blueAvg/counter);
+   fill(c);
+   noStroke();
+   rect(0, 0, 10, 10);
+   }*/
+}
+
+void printSamples() {
+  int tileCount = 10;
+  float rectSize = imgSize / float(tileCount);
+
+  translate(imgSize, 0);
+  for (int i = 0; i < imgArray.length; i++) {
+    int gridY = int((i/tileCount)*rectSize);
+    int gridX = int((i % tileCount) * rectSize);
+    imgArray[i].resize(int(imgSize/tileCount), int(imgSize/tileCount));
+    image(imgArray[i], gridX, gridY);
+  }
+}
+
+
+int[] getLocationID(String lat, String lng) {
+  JSONObject o = loadJSONObject("https://api.instagram.com/v1/locations/search?lat="+lat+"&lng="+lng+"&access_token=3598843.15d6adc.36a98ee4564c45d3ae3c2121b96fe0dc");
+  JSONArray a = o.getJSONArray("data");
+  int[] locIDArray = new int[a.size()];
+
+  println(a);
+
+  if (lat != "52.520436") {
+    for (int i=0; i<a.size (); i++) {
+      JSONObject o2 = a.getJSONObject(i);
+      int id = o2.getInt("id");
+      locIDArray[i] = id;
+    }
+  } else {
+    locIDArray = new int[2];
+    for (int i=0; i<2; i++) {
+      JSONObject o2 = a.getJSONObject(i);
+      int id = o2.getInt("id");
+      locIDArray[i] = id;
+    }
+  } 
+  return locIDArray;
+}
+void mouseClicked() {
+  saveFrame();
+}
